@@ -1,0 +1,99 @@
+version: '3'
+
+x-lagoon-project:
+  &lagoon-project cypress-drupal-example
+
+x-volumes:
+  &default-volumes
+    volumes:
+      - .:/app:delegated
+
+x-environment:
+  &default-environment
+    LAGOON_PROJECT: *lagoon-project
+    LAGOON_ROUTE: http://cypress-drupal.docker.amazee.io
+    CYPRESS_baseUrl: http://nginx:8080
+
+services:
+  cli:
+    build:
+      context: ./drupal
+      dockerfile: cli.dockerfile
+    image: *lagoon-project
+    labels:
+      lagoon.type: cli-persistent
+      lagoon.persistent.name: nginx
+      lagoon.persistent: /app/web/sites/default/files/
+    << : *default-volumes
+    volumes_from:
+      - container:amazeeio-ssh-agent
+    environment:
+      << : *default-environment
+    networks:
+      - amazeeio-network
+      - default
+
+  nginx:
+    build:
+      context: ./drupal
+      dockerfile: nginx.dockerfile
+      args:
+        CLI_IMAGE: *lagoon-project
+    labels:
+      lagoon.type: nginx-php-persistent
+      lagoon.persistent: /app/web/sites/default/files/
+    << : *default-volumes
+    depends_on:
+      - cli
+    environment:
+      << : *default-environment
+      LAGOON_LOCALDEV_URL: cypress-drupal.docker.amazee.io
+    networks:
+      - amazeeio-network
+      - default
+
+  php:
+    build:
+      context: ./drupal
+      dockerfile: php.dockerfile
+      args:
+        CLI_IMAGE: *lagoon-project
+    labels:
+      lagoon.type: nginx-php-persistent
+      lagoon.name: nginx
+      lagoon.persistent: /app/web/sites/default/files/
+    << : *default-volumes
+    depends_on:
+      - cli
+    environment:
+      << : *default-environment
+
+  mariadb:
+    image: amazeeio/mariadb-drupal
+    labels:
+      lagoon.type: mariadb
+    ports:
+      - "3306"
+    environment:
+      << : *default-environment
+
+  e2e:
+    build:
+      context: ./e2e
+      dockerfile: e2e.dockerfile
+    labels:
+      lagoon.name: e2e-cypress
+    command: npx cypress run --headless --browser electron
+    depends_on:
+      - nginx
+    environment:
+      << : *default-environment
+    # mount the host directory /e2e/cypress and the file /e2e/cypress.json as
+    # volumes within the container
+    volumes:
+      - ./e2e/cypress:/app/cypress
+      - ./e2e/cypress.json:/app/cypress.json
+
+networks:
+  amazeeio-network:
+    external: true
